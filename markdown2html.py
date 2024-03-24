@@ -1,101 +1,111 @@
 #!/usr/bin/python3
+
 """
-    Parsing bold syntax
+Markdown to HTML conversion script.
 """
+
 import sys
-from os import path
+import os.path
+import re
 import hashlib
 
-markD = {"#": "h1", "##": "h2", "###": "h3", "####": "h4", "#####": "h5", "######": "h6", "-": "ul", "*": "ol"}
 
-if len(sys.argv) < 3:
-    sys.stderr.write("Usage: ./markdown2html.py README.md README.html\n")
-    exit(1)
+def usage_error():
+    """
+    Prints usage error message.
+    """
+    print("Usage: ./markdown2html.py README.md README.html", file=sys.stderr)
 
-if not path.exists(sys.argv[1]) or not str(sys.argv[1]).endswith(".md"):
-    sys.stderr.write("Missing " + sys.argv[1] + '\n')
-    exit(1)
 
-def inlineMarkdown(line, pattern):
-    flag = False
-    while pattern in line:
-        if not flag:
-            if pattern == "**":
-                line = line.replace(pattern, "<b>", 1)
-                flag = True
-            else:
-                line = line.replace(pattern, "<em>", 1)
-                flag = True
-        else:
-            if pattern == "**":
-                line = line.replace(pattern, "</b>", 1)
-                flag = False
-            else: 
-                line = line.replace(pattern, "</em>", 1)
-                flag = False
-    return line
+def file_missing_error(filename):
+    """
+    Prints file missing error message.
+    """
+    print("Missing {}".format(filename), file=sys.stderr)
 
-def md5Markdown(line):
-    while "[[" in line and "]]" in line:
-        start_idx = line.find("[[")
-        end_idx = line.find("]]")
-        toHash = line[start_idx + 2:end_idx]
-        md = hashlib.md5(toHash.encode()).hexdigest()
-        line = line.replace("[[" + toHash + "]]", md)
-    return line
 
-def caseMarkdown(line):
-    while '((' in line and '))' in line:
-        start_idx = line.find('((')
-        end_idx = line.find('))')
-        toRep = line[start_idx:end_idx + 2]
-        toRep = toRep.replace('c', '').replace('C', '')
-        line = line.replace(line[start_idx:end_idx + 2], toRep[2:-2])
-    return line 
+def remove_c(content):
+    """
+    Removes all occurrences of 'c' or 'C' from content.
+    """
+    return content.replace('c', '').replace('C', '')
 
-with open(sys.argv[1], mode='r') as fr, open(sys.argv[2], mode='w+') as fw:
-    first = 0
-    f = 0
-    read = fr.readlines()
-    for i, line in enumerate(read):
-        # For inline markdown
-        line = inlineMarkdown(line, "**")
-        line = inlineMarkdown(line, "__")
-        line = md5Markdown(line)
-        line = caseMarkdown(line) 
 
-        # split by spaces
-        lineSplit = line.split(' ')
-        if lineSplit[0] in markD:
+def convert_md5(content):
+    """
+    Converts content to MD5 hash.
+    """
+    return hashlib.md5(content.encode()).hexdigest()
+
+
+def convert_markdown_to_html(markdown_file, html_file):
+    """
+    Converts Markdown file to HTML.
+    """
+    if not os.path.isfile(markdown_file):
+        file_missing_error(markdown_file)
+        return
+
+    with open(markdown_file, 'r') as md_file, open(html_file, 'w') as html_file:
+        unordered_list = False
+        ordered_list = False
+        paragraph = False
+
+        for line in md_file:
             # Headings
-            if lineSplit[0].startswith('#'):
-                tag = markD[lineSplit[0]]
-                toWrite = line.replace("{} ".format(lineSplit[0]), "<{}>".format(tag))
-                toWrite = toWrite[:-1] + ("</{}>\n".format(tag))
-                fw.write(toWrite)
-            # Lists
-            elif lineSplit[0].startswith("-") or lineSplit[0].startswith("*"):
-                tag = markD[lineSplit[0]]
-                if not first:
-                    toWrite = "<{}>\n".format(tag)
-                    fw.write(toWrite)
-                    first = lineSplit[0]
-                toWrite = line.replace("{} ".format(lineSplit[0]), "<li>")
-                toWrite = toWrite[:-1] + ("</li>\n")
-                fw.write(toWrite)
-                if i == len(read) - 1 or not read[i + 1].startswith("{} ".format(first)):
-                    toWrite = "</{}>\n".format(tag)
-                    fw.write(toWrite)
-                    first = 0
-        else:
-            if line[0] != "\n":
-                if not f:
-                    fw.write("<p>\n")
-                    f = 1
-                fw.write(line)
-                if i != len(read) - 1 and read[i + 1][0] != "\n" and read[i + 1][0] not in markD:
-                    fw.write("<br/>\n")
-                else: 
-                    fw.write("</p>\n")
-                    f = 0
-    exit(0)
+            match = re.match(r'^(#+)\s(.*)', line)
+            if match:
+                heading_level = len(match.group(1))
+                html_file.write(f"<h{heading_level}>{match.group(2)}</h{heading_level}>\n")
+                continue
+
+            # Unordered list
+            if line.startswith('-'):
+                if not unordered_list:
+                    html_file.write("<ul>\n")
+                    unordered_list = True
+                html_file.write(f"<li>{line.strip('-').strip()}</li>\n")
+                continue
+            elif unordered_list:
+                html_file.write("</ul>\n")
+                unordered_list = False
+
+            # Ordered list
+            if line.startswith('*'):
+                if not ordered_list:
+                    html_file.write("<ol>\n")
+                    ordered_list = True
+                html_file.write(f"<li>{line.strip('*').strip()}</li>\n")
+                continue
+            elif ordered_list:
+                html_file.write("</ol>\n")
+                ordered_list = False
+
+            # Paragraph
+            if line.strip():
+                if not paragraph:
+                    html_file.write("<p>\n")
+                    paragraph = True
+                html_file.write(f"{line.strip()}\n")
+            elif paragraph:
+                html_file.write("</p>\n")
+                paragraph = False
+
+        # Close any open tags
+        if unordered_list:
+            html_file.write("</ul>\n")
+        if ordered_list:
+            html_file.write("</ol>\n")
+        if paragraph:
+            html_file.write("</p>\n")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        usage_error()
+        sys.exit(1)
+
+    markdown_file = sys.argv[1]
+    html_file = sys.argv[2]
+
+    convert_markdown_to_html(markdown_file, html_file)
